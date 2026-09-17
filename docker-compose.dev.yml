@@ -1,18 +1,23 @@
-# Local development only. Run with:
+# Local development. Run with:
 #   docker compose -f docker-compose.dev.yml up --build
 #
-# Deliberately self-contained: every value below is a fixed development
-# credential, none of it read from `.env` (which is reserved for
-# docker-compose.prod.yml). That keeps this file usable immediately after
-# a fresh clone, and immune to a production `.env` sitting in the same
-# directory.
+# Every value below can be overridden from the same `.env` file used by
+# docker-compose.prod.yml - Docker Compose loads `.env` from the project
+# directory automatically for every compose file, not just the one you
+# pass with `-f`. Every value also has a working development default, so
+# a fresh clone with no `.env` at all still starts up immediately; set
+# only the ones you actually want to change (e.g. real SMTP_* credentials
+# to send through mail.ru instead of the local Maildev catcher below).
+# NODE_ENV stays fixed at `development` - that's the one thing this file
+# always controls itself.
 #
 # - Source code is bind-mounted into the container with hot reload
 #   (nest start --watch), so edits on the host take effect immediately.
 # - Postgres data persists in a named volume across restarts.
 # - Maildev catches every outgoing email locally so you can read
 #   verification codes and password reset codes without a real SMTP
-#   server - open http://localhost:1080.
+#   server - open http://localhost:1080. Set SMTP_* in .env to bypass it
+#   and send through a real provider even in dev.
 name: pro-auth-dev
 
 services:
@@ -20,15 +25,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: pro_auth
-      POSTGRES_PASSWORD: pro_auth_dev_password
-      POSTGRES_DB: pro_auth
+      POSTGRES_USER: ${DATABASE_USER:-pro_auth}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-pro_auth_dev_password}
+      POSTGRES_DB: ${DATABASE_NAME:-pro_auth}
     ports:
       - '5432:5432'
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U pro_auth -d pro_auth']
+      test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USER:-pro_auth} -d ${DATABASE_NAME:-pro_auth}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -50,27 +55,32 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: development
-      PORT: 3000
-      DOMAIN: localhost
-      CORS_ORIGIN: '*'
+      PORT: ${PORT:-3000}
+      DOMAIN: ${DOMAIN:-localhost}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
-      DATABASE_NAME: pro_auth
-      DATABASE_USER: pro_auth
-      DATABASE_PASSWORD: pro_auth_dev_password
-      JWT_ACCESS_SECRET: dev_access_secret_not_for_production_use_1234567890
-      JWT_ACCESS_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: dev_refresh_secret_not_for_production_use_1234567890
-      JWT_REFRESH_EXPIRES_IN: 30d
-      BASE_CURRENCY: USD
-      SMTP_HOST: maildev
-      SMTP_PORT: 1025
-      SMTP_SECURE: 'false'
-      SMTP_USER: dev
-      SMTP_PASSWORD: dev
-      SMTP_FROM: no-reply@example.com
+      DATABASE_NAME: ${DATABASE_NAME:-pro_auth}
+      DATABASE_USER: ${DATABASE_USER:-pro_auth}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-pro_auth_dev_password}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_access_secret_not_for_production_use_1234567890}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_not_for_production_use_1234567890}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      BASE_CURRENCY: ${BASE_CURRENCY:-USD}
+      # Falls back to the Maildev container above when unset - set real
+      # SMTP_* values in .env to send through an actual provider instead.
+      SMTP_HOST: ${SMTP_HOST:-maildev}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-dev}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-dev}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
       FILE_STORAGE_PATH: /app/storage/files
       REPORT_STORAGE_PATH: /app/storage/reports
+      # Only read by `npm run seed:admin` (see README) - harmless if unset.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
       - '3000:3000'
     volumes:

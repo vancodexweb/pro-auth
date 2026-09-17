@@ -57,6 +57,9 @@ services:
       SMTP_FROM: ${SMTP_FROM}
       FILE_STORAGE_PATH: /app/storage/files
       REPORT_STORAGE_PATH: /app/storage/reports
+      # Only read by `npm run seed:admin:prod` (see README) - harmless if unset.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - app_prod_storage:/app/storage
     networks:

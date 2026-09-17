@@ -332,7 +332,7 @@ docker compose -f docker-compose.dev.yml up --build
 
 This starts Postgres, [Maildev](https://github.com/maildev/maildev) (a local SMTP catcher - open **http://localhost:1080** to read verification codes and password reset codes instead of configuring a real mailbox), and the app in watch mode at **http://localhost:3000**. Migrations run automatically before the app starts (see the `app` service's `command` in `docker-compose.dev.yml`).
 
-`docker-compose.dev.yml` does **not** read `.env` for its own values - it's fully self-contained with fixed development credentials, so it works immediately after a fresh clone and is never accidentally affected by a production `.env` sitting in the same directory. `.env` is only consumed by `docker-compose.prod.yml` and by running the app directly with `npm run start:dev` (see below).
+`docker-compose.dev.yml` reads the same `.env` file as `docker-compose.prod.yml` - Docker Compose loads `.env` from the project directory automatically for every compose file, not just the one passed with `-f`. Every value also has a working development default (fixed dev DB credentials, dev-only JWT secrets, Maildev for SMTP), so a fresh clone with no `.env` at all still starts up immediately; set only what you actually want to change in `.env` (for example real `SMTP_*` credentials to send through an actual provider instead of Maildev, even in dev). `NODE_ENV` is the one value the dev file always fixes itself, to `development`.
 
 **Running without Docker** (only Postgres needs to be reachable):
 
@@ -342,10 +342,17 @@ npm run migration:run     # requires DATABASE_* in .env to point at a real Postg
 npm run start:dev
 ```
 
-**Create the first admin account** (there's no admin to approve the first admin, so this bypasses the normal flow):
+**Create the first admin account** (there's no admin to approve the first admin, so this bypasses the normal flow). `ADMIN_EMAIL`/`ADMIN_PASSWORD` are read from `.env` (also wired into both compose files' `app` service, so a container that already has `.env` loaded needs nothing extra on the command line):
 
 ```bash
+# Running directly with npm:
 ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='SomeStrongPass123!' npm run seed:admin
+
+# Or inside the dev container, using ADMIN_EMAIL/ADMIN_PASSWORD from .env:
+docker compose -f docker-compose.dev.yml exec app npm run seed:admin
+
+# Same, in production:
+docker compose -f docker-compose.prod.yml exec app npm run seed:admin:prod
 ```
 
 **Open Swagger**: http://localhost:3000/docs
