@@ -1,0 +1,19 @@
+export enum ReportType {
+  TRIAL_BALANCE = 'TRIAL_BALANCE',
+  PROFIT_AND_LOSS = 'PROFIT_AND_LOSS',
+  CASH_FLOW = 'CASH_FLOW',
+  COUNTERPARTY_BALANCES = 'COUNTERPARTY_BALANCES',
+}
+
+export enum ReportFormat {
+  XLSX = 'XLSX',
+  PDF = 'PDF',
+  DOCX = 'DOCX',
+}
+
+export enum ReportStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}

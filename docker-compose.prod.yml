@@ -1,0 +1,118 @@
+# Production deployment. See README.md "Production Deployment" for the
+# full runbook; scripts/deploy.sh drives this file end to end.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Topology: Internet -> nginx (80/443, only published ports) -> app
+# (internal network only) -> postgres (internal network only, no
+# published port). Nothing but nginx is reachable from outside the host.
+name: pro-auth-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DOMAIN: ${DOMAIN}
+      CORS_ORIGIN: https://${DOMAIN}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      BASE_CURRENCY: ${BASE_CURRENCY:-USD}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      FILE_STORAGE_PATH: /app/storage/files
+      REPORT_STORAGE_PATH: /app/storage/reports
+    volumes:
+      - app_prod_storage:/app/storage
+    networks:
+      - internal
+    # No `ports:` - the app is reachable only from other containers on the
+    # internal network (nginx), never directly from the host or Internet.
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./docker/nginx/active:/etc/nginx/templates:ro
+      - ./docker/certbot/conf:/etc/letsencrypt:ro
+      - ./docker/certbot/www:/var/www/certbot:ro
+    environment:
+      DOMAIN: ${DOMAIN}
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost/.well-known/acme-challenge/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # certbot renews the certificate on disk, but nginx caches the loaded
+    # cert in worker memory - it needs its own periodic graceful reload to
+    # ever pick up a renewed file. `nginx -s reload` only signals this same
+    # container's own master process, so no cross-container access (and no
+    # docker.sock mount) is needed for that.
+    command: >
+      /bin/sh -c "while :; do sleep 12h & wait $${!}; nginx -s reload; done &
+      exec nginx -g 'daemon off;'"
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    restart: unless-stopped
+    volumes:
+      - ./docker/certbot/conf:/etc/letsencrypt
+      - ./docker/certbot/www:/var/www/certbot
+    # Renews the certificate twice a day (certbot no-ops unless it's within
+    # its renewal window, ~30 days before expiry) - no manual cron needed.
+    entrypoint: >
+      sh -c "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h;
+      done"
+
+networks:
+  internal:
+
+volumes:
+  postgres_prod_data:
+  app_prod_storage:

@@ -1,0 +1,45 @@
+node_modules/
+dist/
+build/
+
+# Environment
+.env
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Test coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploaded files (local dev storage)
+storage/
+uploads/
+
+# Generated reports
+reports-output/
+
+# SSL / certbot runtime data (keep the directories themselves, via .gitkeep)
+docker/certbot/conf/*
+!docker/certbot/conf/.gitkeep
+docker/certbot/www/*
+!docker/certbot/www/.gitkeep
+
+# Nginx's currently-active rendered config selection (written by scripts/*.sh)
+docker/nginx/active/*
+!docker/nginx/active/.gitkeep
+
+# TypeORM
+*.sqlite

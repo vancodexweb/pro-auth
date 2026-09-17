@@ -1,0 +1,9 @@
+export enum DocumentType {
+  INVOICE = 'INVOICE',
+  ACT = 'ACT',
+  WAYBILL = 'WAYBILL',
+  RECEIPT = 'RECEIPT',
+  WRITE_OFF = 'WRITE_OFF',
+  CORRECTION = 'CORRECTION',
+  INTERNAL = 'INTERNAL',
+}

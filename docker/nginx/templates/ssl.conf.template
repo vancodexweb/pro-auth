@@ -1,0 +1,92 @@
+# Production config for ${DOMAIN}, used once a Let's Encrypt certificate
+# has been issued (see scripts/setup-ssl.sh). HTTP redirects to HTTPS;
+# everything is reverse-proxied to the app over the internal Docker
+# network - the app's own port is never exposed to the host or Internet.
+
+limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=5r/s;
+limit_req_zone $binary_remote_addr zone=general_limit:10m rate=30r/s;
+
+# A keepalive pool to the app so nginx doesn't open a fresh TCP connection
+# to it per request - meaningful at any real request volume.
+upstream app_upstream {
+    server app:3000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    client_max_body_size 15m;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Sensitive auth endpoints get a stricter rate limit than the rest of
+    # the API - registration, login and password reset are the classic
+    # brute-force / enumeration targets.
+    location ~ ^/v[0-9]+/auth/(login|register|forgot-password|resend-verification|verify-email|reset-password) {
+        limit_req zone=auth_limit burst=10 nodelay;
+
+        proxy_pass http://app_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+
+    location / {
+        limit_req zone=general_limit burst=50 nodelay;
+
+        proxy_pass http://app_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+
+        proxy_buffering on;
+        proxy_buffer_size 8k;
+        proxy_buffers 8 8k;
+
+        # Keep-alive to the upstream app.
+        proxy_set_header Connection "";
+    }
+}

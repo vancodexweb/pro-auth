@@ -1,0 +1,26 @@
+# Bootstrap config, used before a TLS certificate exists for ${DOMAIN}.
+# Serves the ACME HTTP-01 challenge Let's Encrypt uses to verify domain
+# ownership, and proxies everything else straight to the app over plain
+# HTTP so the site is still reachable while SSL is being set up.
+# scripts/setup-ssl.sh replaces this with ssl.conf.template once a
+# certificate has been issued.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://app:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}

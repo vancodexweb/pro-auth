@@ -1,0 +1,84 @@
+# Local development only. Run with:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Deliberately self-contained: every value below is a fixed development
+# credential, none of it read from `.env` (which is reserved for
+# docker-compose.prod.yml). That keeps this file usable immediately after
+# a fresh clone, and immune to a production `.env` sitting in the same
+# directory.
+#
+# - Source code is bind-mounted into the container with hot reload
+#   (nest start --watch), so edits on the host take effect immediately.
+# - Postgres data persists in a named volume across restarts.
+# - Maildev catches every outgoing email locally so you can read
+#   verification codes and password reset codes without a real SMTP
+#   server - open http://localhost:1080.
+name: pro-auth-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pro_auth
+      POSTGRES_PASSWORD: pro_auth_dev_password
+      POSTGRES_DB: pro_auth
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pro_auth -d pro_auth']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  maildev:
+    image: maildev/maildev:2.1.0
+    restart: unless-stopped
+    ports:
+      - '1080:1080' # web UI: view every email the app sends
+      - '1025:1025' # SMTP
+
+  app:
+    build:
+      context: .
+      target: development
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DOMAIN: localhost
+      CORS_ORIGIN: '*'
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: pro_auth
+      DATABASE_USER: pro_auth
+      DATABASE_PASSWORD: pro_auth_dev_password
+      JWT_ACCESS_SECRET: dev_access_secret_not_for_production_use_1234567890
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_SECRET: dev_refresh_secret_not_for_production_use_1234567890
+      JWT_REFRESH_EXPIRES_IN: 30d
+      BASE_CURRENCY: USD
+      SMTP_HOST: maildev
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_USER: dev
+      SMTP_PASSWORD: dev
+      SMTP_FROM: no-reply@example.com
+      FILE_STORAGE_PATH: /app/storage/files
+      REPORT_STORAGE_PATH: /app/storage/reports
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - app_dev_storage:/app/storage
+    command: sh -c "npm run migration:run && npm run start:dev"
+
+volumes:
+  postgres_dev_data:
+  app_dev_storage:
