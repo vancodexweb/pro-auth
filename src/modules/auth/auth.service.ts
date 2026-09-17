@@ -100,7 +100,7 @@ export class AuthService {
 
     const passwordHash = await hashPassword(dto.password);
 
-    const userId = await this.dataSource.transaction(async (manager) => {
+    const { userId, verificationCode } = await this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
 
       let user: User;
@@ -178,7 +178,7 @@ export class AuthService {
         manager,
       );
 
-      await this.issueVerificationCode(user, manager);
+      const verificationCode = await this.createVerificationCode(user, manager);
 
       await this.auditService.record(
         {
@@ -191,8 +191,13 @@ export class AuthService {
         manager,
       );
 
-      return user.id;
+      return { userId: user.id, verificationCode };
     });
+
+    // Sent only after the transaction above has committed - see the
+    // comment on `issueVerificationCode` for why this can never happen
+    // while that transaction is still open.
+    await this.mailService.sendVerificationCode(email, verificationCode);
 
     return { userId, email };
   }
@@ -518,10 +523,17 @@ export class AuthService {
     });
   }
 
-  private async issueVerificationCode(
+  /**
+   * DB-only half of issuing a code: creating it never touches the network,
+   * so it's safe to run inside a transaction. Split from
+   * `issueVerificationCode` so `register()` can create the token as part
+   * of its transaction and send the email only after that transaction has
+   * committed - see the comment on `issueVerificationCode` for why.
+   */
+  private async createVerificationCode(
     user: User,
     manager = this.dataSource.manager,
-  ): Promise<void> {
+  ): Promise<string> {
     const repo = manager.getRepository(EmailVerificationToken);
     await repo.update({ userId: user.id, consumedAt: IsNull() }, { consumedAt: new Date() });
 
@@ -533,6 +545,24 @@ export class AuthService {
         expiresAt: new Date(Date.now() + EMAIL_CODE_TTL_MS),
       }),
     );
+    return code;
+  }
+
+  /**
+   * Only safe to call OUTSIDE an open transaction (or as the last thing
+   * before one commits with nothing left to run after it): sending mail is
+   * external network I/O, and a slow/unreachable SMTP server can hang well
+   * past `idle_in_transaction_session_timeout`, which then kills the
+   * connection - any DB call made afterwards on that same transaction
+   * fails with TypeORM's "QueryRunnerAlreadyReleasedError" instead of the
+   * real SMTP error. `register()` therefore calls `createVerificationCode`
+   * inside its transaction and only sends the email after it commits.
+   */
+  private async issueVerificationCode(
+    user: User,
+    manager = this.dataSource.manager,
+  ): Promise<void> {
+    const code = await this.createVerificationCode(user, manager);
     await this.mailService.sendVerificationCode(user.email, code);
   }
 

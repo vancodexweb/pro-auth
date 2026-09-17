@@ -49,7 +49,7 @@ export class UsersService {
    * employee record.
    */
   async approve(userId: string, adminId: string, dto: ApproveUserDto): Promise<User> {
-    return this.dataSource.transaction(async (manager) => {
+    const user = await this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
       const user = await userRepo.findOne({
         where: { id: userId },
@@ -85,13 +85,23 @@ export class UsersService {
         manager,
       );
 
-      await this.mailService.sendAccountApproved(user.email);
       return user;
     });
+
+    // Sent only after the transaction above has committed - see the
+    // comment on AuthService.issueVerificationCode for why mail (external
+    // network I/O) can never run while a transaction is still open: a
+    // slow/unreachable SMTP server can hang past
+    // idle_in_transaction_session_timeout, which kills the connection and
+    // makes the subsequent COMMIT fail with TypeORM's
+    // "QueryRunnerAlreadyReleasedError" instead of the real SMTP error -
+    // silently losing the approval that had already been written.
+    await this.mailService.sendAccountApproved(user.email);
+    return user;
   }
 
   async reject(userId: string, adminId: string, reason: string): Promise<User> {
-    return this.dataSource.transaction(async (manager) => {
+    const user = await this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
       const user = await userRepo.findOne({
         where: { id: userId },
@@ -122,13 +132,17 @@ export class UsersService {
         manager,
       );
 
-      await this.mailService.sendAccountRejected(user.email, reason);
       return user;
     });
+
+    // Sent only after the transaction above has committed - see the
+    // comment on `approve()` for why.
+    await this.mailService.sendAccountRejected(user.email, reason);
+    return user;
   }
 
   async block(userId: string, adminId: string, reason: string): Promise<User> {
-    return this.dataSource.transaction(async (manager) => {
+    const user = await this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
       const user = await userRepo.findOne({
         where: { id: userId },
@@ -163,9 +177,13 @@ export class UsersService {
         manager,
       );
 
-      await this.mailService.sendAccountBlocked(user.email, reason);
       return user;
     });
+
+    // Sent only after the transaction above has committed - see the
+    // comment on `approve()` for why.
+    await this.mailService.sendAccountBlocked(user.email, reason);
+    return user;
   }
 
   async unblock(userId: string, adminId: string): Promise<User> {
